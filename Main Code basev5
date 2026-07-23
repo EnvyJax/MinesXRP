@@ -1,0 +1,217 @@
+import importlib
+import time
+
+
+class _DummySensor:
+    def read(self):
+        return None
+
+    def get(self):
+        return None
+
+
+class _DummyDrivetrain:
+    def set_effort(self, left, right):
+        pass
+
+    def stop(self):
+        pass
+
+
+class _DummyDistance:
+    def get_distance(self):
+        return None
+
+
+class _DummyPad:
+    def on(self):
+        pass
+
+
+class _DummyPads:
+    def __init__(self):
+        self.blue = _DummyPad()
+        self.green = _DummyPad()
+
+
+class _SimReflectance:
+    def __init__(self):
+        self.tick = 0
+
+    def read(self):
+        self.tick += 1
+        if self.tick < 20:
+            return (0.20, 0.20)
+        return (0.354, 0.391)
+
+    def get(self):
+        return self.read()
+
+
+class _SimDrivetrain:
+    def __init__(self):
+        self.last_command = None
+
+    def set_effort(self, left, right):
+        self.last_command = (left, right)
+        print(f"[sim] drive left={left:.2f} right={right:.2f}")
+
+    def stop(self):
+        self.last_command = (0.0, 0.0)
+        print("[sim] stop")
+
+
+class _SimDistance:
+    def __init__(self):
+        self.value = 100.0
+
+    def get_distance(self):
+        self.value = max(0.0, self.value - 1.0)
+        return self.value
+
+
+class _SimPad:
+    def on(self):
+        print("[sim] pad activated")
+
+
+class _SimPads:
+    def __init__(self):
+        self.blue = _SimPad()
+        self.green = _SimPad()
+
+
+try:
+    defaults = importlib.import_module("XRPLib.defaults")
+    reflectance = getattr(defaults, "reflectance", _DummySensor())
+    drivetrain = getattr(defaults, "drivetrain", _DummyDrivetrain())
+    distance = getattr(defaults, "distance", _DummyDistance())
+    pads = getattr(defaults, "pads", _DummyPads())
+    HARDWARE_AVAILABLE = True
+except Exception:
+    reflectance = _SimReflectance()
+    drivetrain = _SimDrivetrain()
+    distance = _SimDistance()
+    pads = _SimPads()
+    HARDWARE_AVAILABLE = False
+
+BASE_SPEED = 0.6
+DRIFT_ADJUST = 0.06
+TURN_SPEED = 0.45
+BLUE_DISTANCE = 70.4
+RAMP_DISTANCE = 50.0
+GREEN_MOUNTAIN_DISTANCE = 51.4
+STOP_DISTANCE = 12.0
+GREEN_TARGET = (0.354, 0.391)
+REFLECT_TOL = 0.12
+MAX_MOTOR_SPEED = 1.0
+
+
+def clamp_speed(speed):
+    return max(-MAX_MOTOR_SPEED, min(speed, MAX_MOTOR_SPEED))
+
+def get_reflectance():
+    try:
+        v = reflectance.read()
+    except Exception:
+        try:
+            v = reflectance.get()
+        except Exception:
+            return None
+    if not v:
+        return None
+    if isinstance(v, (list, tuple)) and len(v) >= 2:
+        return float(v[0]), float(v[1])
+    return None
+
+def close_enough(a, b, tol=REFLECT_TOL):
+    return abs(a - b) <= tol * max(abs(a), abs(b), 1.0)
+
+def detect_reflect_pair(target_left, target_right):
+    r = get_reflectance()
+    if not r:
+        return False
+    return close_enough(r[0], target_left) and close_enough(r[1], target_right)
+
+def set_drive(speed):
+    left = clamp_speed(speed)
+    right = clamp_speed(speed - DRIFT_ADJUST)
+    drivetrain.set_effort(left, right)
+
+def stop_drive():
+    drivetrain.stop()
+
+def turn_left():
+    drivetrain.set_effort(-TURN_SPEED, TURN_SPEED)
+    time.sleep(0.7)
+    stop_drive()
+    time.sleep(0.2)
+
+def turn_right():
+    drivetrain.set_effort(TURN_SPEED, -TURN_SPEED)
+    time.sleep(0.7)
+    stop_drive()
+    time.sleep(0.2)
+
+blue_seen = False
+green_seen = False
+ramp_turned = False
+green_mountain_turned = False
+
+
+def main():
+    set_drive(BASE_SPEED)
+    max_iterations = 120 if not HARDWARE_AVAILABLE else 1000000
+
+    for _ in range(max_iterations):
+        try:
+            d = None
+            try:
+                d = float(distance.get_distance())
+            except Exception:
+                pass
+
+            if not blue_seen and d is not None and d <= BLUE_DISTANCE:
+                try:
+                    pads.blue.on()
+                except Exception:
+                    pass
+                stop_drive()
+                turn_left()
+                blue_seen = True
+                set_drive(BASE_SPEED)
+
+            if not green_seen and detect_reflect_pair(*GREEN_TARGET):
+                try:
+                    pads.green.on()
+                except Exception:
+                    pass
+                green_seen = True
+
+            if not ramp_turned and d is not None and d <= RAMP_DISTANCE:
+                stop_drive()
+                turn_right()
+                ramp_turned = True
+                set_drive(BASE_SPEED)
+
+            if green_seen and not green_mountain_turned and d is not None and d <= GREEN_MOUNTAIN_DISTANCE:
+                stop_drive()
+                turn_left()
+                green_mountain_turned = True
+                set_drive(BASE_SPEED)
+
+            if d is not None and d <= STOP_DISTANCE:
+                stop_drive()
+                break
+
+            time.sleep(0.02)
+        except KeyboardInterrupt:
+            stop_drive()
+            break
+
+    stop_drive()
+
+
+if __name__ == "__main__":
+    main()
+
