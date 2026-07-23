@@ -1,40 +1,114 @@
 from XRPLib.defaults import *
 import time
 
-#functions
-def drive(speed, seconds):
-    drivetrain.set_effort(speed, speed)
-    time.sleep(seconds)
+def _get_reflectance():
+    try:
+        v = reflectance.read()
+    except Exception:
+        try:
+            v = reflectance.get()
+        except Exception:
+            try:
+                v = reflectance.get_reflectance()
+            except Exception:
+                v = None
+    if v is None:
+        return None
+    if isinstance(v, (list, tuple)):
+        if len(v) >= 2:
+            return float(v[0]), float(v[1])
+        if len(v) == 1:
+            return float(v[0]), float(v[0])
+    if hasattr(v, 'left') and hasattr(v, 'right'):
+        return float(v.left), float(v.right)
+    try:
+        f = float(v)
+        return f, f
+    except Exception:
+        return None
+
+def _close(a, b, tol=0.12):
+    return abs(a - b) <= max(tol * max(abs(a), abs(b), 1.0), 0.01)
+
+def _detect_pair(target_left, target_right):
+    r = _get_reflectance()
+    if not r:
+        return False
+    return _close(r[0], target_left) and _close(r[1], target_right)
+
+def _set_drive(base):
+    c = 0.04
+    l = base
+    r = base - c
+    drivetrain.set_effort(l, r)
+
+def _stop():
     drivetrain.stop()
+
+def _turn_left():
+    drivetrain.set_effort(-0.45, 0.45)
+    time.sleep(0.7)
+    _stop()
     time.sleep(0.2)
 
-def left_turn():
-    drivetrain.set_effort(-0.4, 0.4)
-    time.sleep(0.72)      # Adjust during testing
-    drivetrain.stop()
+def _turn_right():
+    drivetrain.set_effort(0.45, -0.45)
+    time.sleep(0.7)
+    _stop()
     time.sleep(0.2)
 
-def right_turn():
-    drivetrain.set_effort(0.4, -0.4)
-    time.sleep(0.72)
-    drivetrain.stop()
-    time.sleep(0.2)
+blue_target = (0.615, 0.552)
+green_target = (0.354, 0.391)
 
-# auto
+blue_seen = False
+green_seen = False
+ramp_turned = False
+green_mountain_turned = False
 
-drive(0.5, 2.0)
+_set_drive(0.5)
 
-left_turn()
+while True:
+    try:
+        if not blue_seen and _detect_pair(*blue_target):
+            try:
+                pads.blue.on()
+            except Exception:
+                pass
+            _stop()
+            _turn_left()
+            blue_seen = True
+            _set_drive(0.6)
 
-drive(0.5, 2.4)
+        if not green_seen and _detect_pair(*green_target):
+            try:
+                pads.green.on()
+            except Exception:
+                pass
+            green_seen = True
 
-right_turn()
+        d = None
+        try:
+            d = float(distance.get_distance())
+        except Exception:
+            pass
 
-drive(0.5, 1.7)
+        if not ramp_turned and d is not None and d <= 50:
+            _stop()
+            _turn_right()
+            ramp_turned = True
+            _set_drive(0.6)
 
-right_turn()
+        if green_seen and not green_mountain_turned and d is not None and d <= 51.4:
+            _stop()
+            _turn_left()
+            green_mountain_turned = True
+            _set_drive(0.6)
 
-while distance.get_distance() > 12:
-    drivetrain.set_effort(0.4, 0.4)
+        if d is not None and d <= 12:
+            _stop()
+            break
 
-drivetrain.stop()
+        time.sleep(0.02)
+    except KeyboardInterrupt:
+        _stop()
+        break
