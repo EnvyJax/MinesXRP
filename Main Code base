@@ -1,0 +1,40 @@
+from XRPLib.defaults import *
+import time
+
+#functions
+def drive(speed, seconds):
+    drivetrain.set_effort(speed, speed)
+    time.sleep(seconds)
+    drivetrain.stop()
+    time.sleep(0.2)
+
+def left_turn():
+    drivetrain.set_effort(-0.4, 0.4)
+    time.sleep(0.72)      # Adjust during testing
+    drivetrain.stop()
+    time.sleep(0.2)
+
+def right_turn():
+    drivetrain.set_effort(0.4, -0.4)
+    time.sleep(0.72)
+    drivetrain.stop()
+    time.sleep(0.2)
+
+# auto
+
+drive(0.5, 2.0)
+
+left_turn()
+
+drive(0.5, 2.4)
+
+right_turn()
+
+drive(0.5, 1.7)
+
+right_turn()
+
+while distance.get_distance() > 12:
+    drivetrain.set_effort(0.4, 0.4)
+
+drivetrain.stop()
